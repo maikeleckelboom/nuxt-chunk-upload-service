@@ -22,10 +22,14 @@ watch(queue, async () => {
 }, {deep: true})
 
 const client = useSanctumClient();
+const abortControllers = ref<Map<File, AbortController>>(new Map());
 
 async function upload() {
   const file = queue.value.values().next().value;
   progress.value = 0;
+
+  const controller = new AbortController();
+  abortControllers.value.set(file, controller);
 
   const identifier = nanoid(8);
   const chunkSize = (1024 * 1024) * 2;
@@ -45,7 +49,8 @@ async function upload() {
     try {
       const response = await client('/upload', {
         method: 'POST',
-        body: formData
+        body: formData,
+        signal: controller.signal
       });
       progress.value = response.progress ?? 100;
     } catch (e: FetchError) {
@@ -53,6 +58,7 @@ async function upload() {
     }
   }
 
+  abortControllers.value.delete(file);
   queue.value.delete(file);
 }
 
@@ -61,6 +67,15 @@ const onFileChange = (files: FileList | File[]) => {
     queue.value.add(files[i]);
   }
 };
+
+function abortUpload(file: File) {
+  const controller = abortControllers.value.get(file);
+  if (controller) {
+    controller.abort();
+    abortControllers.value.delete(file);
+    queue.value.delete(file);
+  }
+}
 </script>
 
 <template>
@@ -72,6 +87,15 @@ const onFileChange = (files: FileList | File[]) => {
       <p class="text-muted-foreground text-sm">
         Resume file upload with chunking.
       </p>
+      <div class="mt-2 flex gap-2">
+        <Button variant="secondary" @click="queue.clear()">
+          Clear Queue
+        </Button>
+
+        <Button variant="secondary" @click="abortUpload(Array.from(queue)[0])">
+          Abort Upload
+        </Button>
+      </div>
     </div>
     <Progress v-model="progress" class="mb-4"/>
     <UploadDropzone @change="onFileChange"/>
