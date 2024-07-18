@@ -1,15 +1,17 @@
 <script setup lang="ts">
+import type {FetchError} from "ofetch";
 import {nanoid} from "nanoid";
-import {FetchError} from "ofetch";
 
-const client = useSanctumClient();
+const PARALLEL_UPLOADS: number = 5 as const;
 
 const queue = ref<Set<File>>(new Set());
 const progress = ref<number>(0);
-const PARALLEL_UPLOADS: number = 5 as const;
 
 watch(queue, async () => {
-  if (queue.value.size < 1) return;
+  if (queue.value.size < 1) {
+    progress.value = 0;
+    return;
+  }
 
   if (queue.value.size > PARALLEL_UPLOADS) {
     const uploads = Array.from(queue.value).slice(0, PARALLEL_UPLOADS);
@@ -19,6 +21,7 @@ watch(queue, async () => {
   }
 }, {deep: true})
 
+const client = useSanctumClient();
 
 async function upload() {
   const file = queue.value.values().next().value;
@@ -44,7 +47,7 @@ async function upload() {
         method: 'POST',
         body: formData
       });
-      progress.value = response.progress ?? 0;
+      progress.value = response.progress ?? 100;
     } catch (e: FetchError) {
       console.warn('An error occurred', e.message)
     }
