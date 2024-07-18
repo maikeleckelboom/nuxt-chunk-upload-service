@@ -18,7 +18,7 @@ const progress = computed<number>(() => {
     return 0;
   }
 
-  return Math.floor(((filesLength.value - queueMap.value.size) / filesLength.value) * 100);
+  return Math.floor(((totalFilesToUpload.value - queueMap.value.size) / totalFilesToUpload.value) * 100);
 })
 
 const client = useSanctumClient();
@@ -82,12 +82,13 @@ async function upload(file: File, identifier: string) {
   queueMap.value.delete(identifier);
 }
 
-const filesLength = ref<number>(0);
+// Rename to; to represent the number of files at the moment of upload; to calculate the progress
+const totalFilesToUpload = ref<number>(0);
 
 async function onFileChange(files: FileList | File[]) {
-  filesLength.value = Array.from(files).length;
+  totalFilesToUpload.value = Array.from(files).length;
 
-  for (let i = 0; i < filesLength.value; i++) {
+  for (let i = 0; i < totalFilesToUpload.value; i++) {
     const identifier = nanoid(8);
     queueMap.value.set(identifier, {
       file: files[i],
@@ -100,7 +101,7 @@ async function onFileChange(files: FileList | File[]) {
   while (queueMap.value.size > 0) {
 
     if (Array.from(queueMap.value.values()).filter(item => item.status === 'uploading').length >= PARALLEL_UPLOADS) {
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise(resolve => setTimeout(resolve, 500));
       continue;
     }
 
@@ -113,24 +114,31 @@ async function onFileChange(files: FileList | File[]) {
     for (const response of responses) {
       switch (response.status) {
         case 'fulfilled':
-          console.log('Upload completed', response.value);
           break;
         case 'rejected':
-          console.warn('Upload failed', response.reason);
+          queueMap.value.set(response.reason.identifier, {
+            ...queueMap.value.get(response.reason.identifier)!,
+            status: 'error'
+          });
           break;
       }
     }
   }
 
-  filesLength.value = 0;
-
+  totalFilesToUpload.value = 0;
 }
 
-function abortUpload(identifier: string) {
-  const controller = queueMap.value.get(identifier)?.controller;
-  if (controller) {
-    controller.abort();
+function abortUpload(identifier?: string) {
+  if (identifier) {
+    const controller = queueMap.value.get(identifier)?.controller;
+    if (controller) controller.abort();
   }
+
+  for (const item of queueMap.value.values()) {
+    if (item.controller) item.controller.abort();
+  }
+
+  queueMap.value.clear();
 }
 
 function pauseUpload(identifier: string) {
@@ -171,9 +179,9 @@ function pauseUpload(identifier: string) {
           <h2 class="text-lg font-semibold tracking-tight leading-relaxed">
             Upload Queue ({{ queueMap.size }})
           </h2>
-          <ul class="mt-2">
+          <ul class="mt-2 flex flex-col gap-2">
             <li v-for="[identifier, item] in queueMap" :key="identifier" class="flex justify-between items-center py-2">
-              <div class="grid grid-cols-[auto,1fr] grid-rows-2 gap-2 items-center">
+              <div class="grid grid-cols-[auto,1fr] grid-rows-min gap-2 items-center">
                 <div class="grid grid-cols-[auto,1fr] gap-2 items-center">
                   <IconFileUp class="size-6"/>
                   <span>{{ item.file.name }}</span>
@@ -181,8 +189,10 @@ function pauseUpload(identifier: string) {
                 <div class="flex flex-col gap-2">
                   <Progress v-model="item.progress"/>
                   <div>
-                    <span>{{ identifier }}</span>
-                    <pre>{{ item }}</pre>
+                    <span class="line-clamp-1">{{ identifier }}</span>
+                    <span class="px-1 py-0.5 bg-blue-300 text-blue-800 font-semibold leading-none">
+                      {{ item.status }}
+                    </span>
                   </div>
                   <div>
                     <Button variant="secondary" @click="pauseUpload(identifier)">
@@ -194,11 +204,12 @@ function pauseUpload(identifier: string) {
                   </div>
                 </div>
               </div>
-              <Button variant="secondary" @click="abortUpload(identifier)">
-                Abort
-              </Button>
             </li>
           </ul>
+
+          <Button variant="secondary" @click="abortUpload()">
+            Abort All
+          </Button>
         </div>
       </div>
     </div>
