@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type {FetchError} from "ofetch";
 import {nanoid} from "nanoid";
+import {sleep} from "@antfu/utils";
 
 const PARALLEL_UPLOADS: number = 2 as const;
 
@@ -12,30 +13,23 @@ interface QueueItem {
 }
 
 const queueMap = ref<Map<string, QueueItem>>(new Map());
+const totalFilesToUpload = shallowRef<number>(0);
 
 const progress = computed<number>(() => {
-  if (queueMap.value.size === 0) {
+  if (queueMap.value.size === 0 || totalFilesToUpload.value === 0) {
     return 0;
   }
 
-  const relativeProgress = Array.from(queueMap.value.values())
-      .map(item => item.progress)
-      .reduce((acc, value) => acc + value, 0);
+  const totalProgress = Array.from(queueMap.value.values())
+      .reduce((acc, item) => acc + item.progress, 0);
+  const maxTotalProgress = totalFilesToUpload.value * 100;
 
-  return relativeProgress / queueMap.value.size;
-})
-
-const totalFilesToUpload = shallowRef<number>(0);
+  return Math.floor((totalProgress / maxTotalProgress) * 100);
+});
 
 const client = useSanctumClient();
 
 async function upload(file: File, identifier: string) {
-
-  if(queueMap.value.get(identifier)?.status === 'paused') {
-    console.log('stopped upload for', identifier);
-    return;
-  }
-
   const controller = new AbortController();
 
   queueMap.value.set(identifier, {
@@ -45,59 +39,54 @@ async function upload(file: File, identifier: string) {
     progress: 0
   });
 
+  await sleep(200);
+
   const chunkSize = (1024 * 1024) * 2;
   const totalChunks = Math.ceil(file.size / chunkSize)
 
   for (let i = 0; i < totalChunks; i++) {
-
     const formData = new FormData();
     const chunkNumber = i + 1;
     const currentChunk = file.slice(i * chunkSize, chunkNumber * chunkSize);
 
     formData.append('identifier', identifier);
     formData.append('fileName', file.name);
-    formData.append('fileSize', file.size.toString());
     formData.append('chunkNumber', chunkNumber.toString());
     formData.append('totalChunks', totalChunks.toString());
     formData.append('currentChunk', currentChunk);
 
     try {
-
-      const response = await client('/upload', {
+      const {progress, status,} = await client('/upload', {
         method: 'POST',
         body: formData,
         signal: controller.signal
       });
 
       queueMap.value.set(identifier, {
-        file,
-        controller,
-        progress: response.progress,
-        status: response.status
+        file, controller, status,
+        progress: status === 'uploading' ? progress : 100
       });
 
     } catch (err: FetchError) {
       const isPaused = controller.signal.reason === 'paused';
-      if (isPaused) {
-        console.log('paused upload for', identifier);
-        return;
-      } else {
-        queueMap.value.set(identifier, {
-          file,
-          controller,
-          status: 'failed',
-          progress: queueMap.value.get(identifier)?.progress || 0
-        });
-      }
+
+      queueMap.value.set(identifier, {
+        file,
+        controller,
+        status: isPaused ? 'paused' : 'failed',
+        progress: queueMap.value.get(identifier).progress
+      });
+    }
+
+    if (controller.signal.aborted) {
+      break;
+    }
+
+    if (queueMap.value.get(identifier).status === 'completed') {
+      await sleep(200);
+      queueMap.value.delete(identifier);
     }
   }
-
-  if (queueMap.value.get(identifier)?.status === 'failed' || controller.signal.reason === 'paused') {
-    return;
-  }
-
-  await new Promise(resolve => setTimeout(resolve, 500));
-  queueMap.value.delete(identifier);
 }
 
 
@@ -114,60 +103,50 @@ async function onFileChange(files: FileList | File[]) {
     queueMap.value.set(identifier, {
       file: files[i],
       progress: 0,
-      status: 'queued'
+      status: 'queued',
     });
   }
 
+
   while (queueMap.value.size > 0) {
+    // Upload in batches of PARALLEL_UPLOADS
+    const batch = Array.from(queueMap.value.entries())
+        .filter(([_, item]) => item.status === 'queued')
+        .slice(0, PARALLEL_UPLOADS);
 
-    if (Array.from(queueMap.value.values()).filter(item => item.status === 'uploading').length >= PARALLEL_UPLOADS) {
-      await new Promise(resolve => setTimeout(resolve, 500));
-      continue;
-    }
+    await Promise.all(batch.map(([identifier, item]) => upload(item.file, identifier)))
 
-    const responses = await Promise.allSettled(
-        Array.from(queueMap.value.keys())
-            .slice(0, PARALLEL_UPLOADS)
-            .map(identifier => upload(queueMap.value.get(identifier)!.file, identifier))
-    );
-
-    for (const response of responses) {
-      switch (response.status) {
-        case 'fulfilled':
-          break;
-        case 'rejected':
-          queueMap.value.set(response.reason.identifier, {
-            ...queueMap.value.get(response.reason.identifier)!,
-            status: 'failed'
-          });
-          break;
+    for (const [identifier, item] of batch) {
+      if (item.status === 'uploading') {
+        queueMap.value.set(identifier, {
+          ...item,
+          status: 'completed',
+          progress: 100
+        });
       }
     }
   }
-
-  totalFilesToUpload.value = 0;
 }
 
 function abortUpload(identifier?: string) {
-  console.log('aborting', identifier);
-
   if (identifier) {
     const controller = queueMap.value.get(identifier)?.controller;
-    if (controller) controller.abort();
+    if (controller) {
+      controller.abort();
+    }
     queueMap.value.delete(identifier);
-    return
+  } else {
+    for (const item of queueMap.value.values()) {
+      if (item.controller) {
+        item.controller.abort();
+      }
+    }
+    queueMap.value.clear();
   }
-
-  for (const item of queueMap.value.values()) {
-    if (item.controller) item.controller.abort();
-  }
-
-  queueMap.value.clear();
 }
 
 function pauseUpload(identifier: string) {
   const item = queueMap.value.get(identifier);
-  console.log('pausing', identifier);
   queueMap.value.set(identifier, {
     ...item,
     status: 'paused'
@@ -220,13 +199,15 @@ function pauseUpload(identifier: string) {
                       {{ item.status }}
                     </span>
                   </div>
-                  <div>
-                    <Button variant="secondary" @click="pauseUpload(identifier)">
-                      Pause
-                    </Button>
-                    <Button variant="secondary" @click="abortUpload(identifier)">
-                      Cancel
-                    </Button>
+                  <div class="flex gap-2">
+                    <template v-if="item.status !== 'completed'">
+                      <Button variant="secondary" @click="pauseUpload(identifier)">
+                        Pause
+                      </Button>
+                      <Button variant="secondary" @click="abortUpload(identifier)">
+                        Cancel
+                      </Button>
+                    </template>
                   </div>
                 </div>
               </div>
