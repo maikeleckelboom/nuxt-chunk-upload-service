@@ -18,7 +18,7 @@ const {isOverDropZone} = useDropZone(dropZoneRef, {
   onDrop
 })
 
-const {files, open, onChange} = useFileDialog({
+const {files, open, onChange,reset} = useFileDialog({
   accept: '*',
   directory: false,
 })
@@ -26,6 +26,7 @@ const {files, open, onChange} = useFileDialog({
 onChange((files) => {
   if (!files) return
   handleEmit(files)
+  reset()
 })
 </script>
 

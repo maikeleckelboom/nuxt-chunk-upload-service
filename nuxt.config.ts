@@ -7,8 +7,9 @@ export default defineNuxtConfig({
     },
 
     devtools: {enabled: true},
+
     modules: ['nuxt-auth-sanctum', '@vueuse/nuxt'],
-    // Auth
+
     runtimeConfig: {
         public: {
             sanctum: {
