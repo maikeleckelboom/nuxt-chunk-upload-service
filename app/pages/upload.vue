@@ -6,7 +6,7 @@ const client = useSanctumClient();
 
 const queue = ref<Set<File>>(new Set());
 const progress = ref<number>(0);
-const PARALLEL_UPLOADS: number = 1 as const;
+const PARALLEL_UPLOADS: number = 5 as const;
 
 watch(queue, async () => {
   if (queue.value.size < 1) return;
@@ -32,13 +32,12 @@ async function upload() {
     const formData = new FormData();
     const chunkNumber = i + 1;
     const currentChunk = file.slice(i * chunkSize, chunkNumber * chunkSize);
-    formData.append('filename', file.name);
     formData.append('identifier', identifier);
-    formData.append('fileSize', file.size.toString());
-    formData.append('totalChunks', totalChunks.toString());
+    formData.append('filename', file.name);
+    formData.append('totalSize', file.size.toString());
     formData.append('chunkNumber', chunkNumber.toString());
+    formData.append('totalChunks', totalChunks.toString());
     formData.append('currentChunk', currentChunk);
-    formData.append('chunkSize', chunkSize.toString());
 
     try {
       const response = await client('/upload', {
