@@ -6,7 +6,7 @@ const PARALLEL_UPLOADS: number = 2 as const;
 
 interface QueueItem {
   file: File;
-  status: 'queued' | 'uploading' | 'completed' | 'error';
+  status: 'paused' | 'queued' | 'uploading' | 'completed' | 'failed';
   progress: number;
   controller?: AbortController;
 }
@@ -18,12 +18,23 @@ const progress = computed<number>(() => {
     return 0;
   }
 
-  return Math.floor(((totalFilesToUpload.value - queueMap.value.size) / totalFilesToUpload.value) * 100);
+  const relativeProgress = Array.from(queueMap.value.values())
+      .map(item => item.progress)
+      .reduce((acc, value) => acc + value, 0);
+
+  return relativeProgress / queueMap.value.size;
 })
+
+const totalFilesToUpload = shallowRef<number>(0);
 
 const client = useSanctumClient();
 
 async function upload(file: File, identifier: string) {
+
+  if(queueMap.value.get(identifier)?.status === 'paused') {
+    console.log('stopped upload for', identifier);
+    return;
+  }
 
   const controller = new AbortController();
 
@@ -34,24 +45,24 @@ async function upload(file: File, identifier: string) {
     progress: 0
   });
 
-  console.log('Uploading file', queueMap.value.get(identifier));
-
   const chunkSize = (1024 * 1024) * 2;
   const totalChunks = Math.ceil(file.size / chunkSize)
 
   for (let i = 0; i < totalChunks; i++) {
+
     const formData = new FormData();
     const chunkNumber = i + 1;
     const currentChunk = file.slice(i * chunkSize, chunkNumber * chunkSize);
 
     formData.append('identifier', identifier);
-    formData.append('filename', file.name);
-    formData.append('totalSize', file.size.toString());
+    formData.append('fileName', file.name);
+    formData.append('fileSize', file.size.toString());
     formData.append('chunkNumber', chunkNumber.toString());
     formData.append('totalChunks', totalChunks.toString());
     formData.append('currentChunk', currentChunk);
 
     try {
+
       const response = await client('/upload', {
         method: 'POST',
         body: formData,
@@ -62,30 +73,40 @@ async function upload(file: File, identifier: string) {
         file,
         controller,
         progress: response.progress,
-        status: response.status === 201 ? 'completed' : 'uploading'
+        status: response.status
       });
 
-    } catch (e: FetchError) {
-
-      console.warn('An error occurred', e.message)
-
-      queueMap.value.set(identifier, {
-        file,
-        controller,
-        status: 'error',
-        progress: queueMap.value.get(identifier)?.progress || 0
-      });
+    } catch (err: FetchError) {
+      const isPaused = controller.signal.reason === 'paused';
+      if (isPaused) {
+        console.log('paused upload for', identifier);
+        return;
+      } else {
+        queueMap.value.set(identifier, {
+          file,
+          controller,
+          status: 'failed',
+          progress: queueMap.value.get(identifier)?.progress || 0
+        });
+      }
     }
+  }
+
+  if (queueMap.value.get(identifier)?.status === 'failed' || controller.signal.reason === 'paused') {
+    return;
   }
 
   await new Promise(resolve => setTimeout(resolve, 500));
   queueMap.value.delete(identifier);
 }
 
-// Rename to; to represent the number of files at the moment of upload; to calculate the progress
-const totalFilesToUpload = ref<number>(0);
 
 async function onFileChange(files: FileList | File[]) {
+
+  if (totalFilesToUpload.value > 0) {
+    return;
+  }
+
   totalFilesToUpload.value = Array.from(files).length;
 
   for (let i = 0; i < totalFilesToUpload.value; i++) {
@@ -96,7 +117,6 @@ async function onFileChange(files: FileList | File[]) {
       status: 'queued'
     });
   }
-
 
   while (queueMap.value.size > 0) {
 
@@ -118,7 +138,7 @@ async function onFileChange(files: FileList | File[]) {
         case 'rejected':
           queueMap.value.set(response.reason.identifier, {
             ...queueMap.value.get(response.reason.identifier)!,
-            status: 'error'
+            status: 'failed'
           });
           break;
       }
@@ -129,9 +149,13 @@ async function onFileChange(files: FileList | File[]) {
 }
 
 function abortUpload(identifier?: string) {
+  console.log('aborting', identifier);
+
   if (identifier) {
     const controller = queueMap.value.get(identifier)?.controller;
     if (controller) controller.abort();
+    queueMap.value.delete(identifier);
+    return
   }
 
   for (const item of queueMap.value.values()) {
@@ -142,10 +166,12 @@ function abortUpload(identifier?: string) {
 }
 
 function pauseUpload(identifier: string) {
-  const controller = queueMap.value.get(identifier)?.controller;
-  if (controller) {
-    controller.abort('paused');
-  }
+  const item = queueMap.value.get(identifier);
+  console.log('pausing', identifier);
+  queueMap.value.set(identifier, {
+    ...item,
+    status: 'paused'
+  });
 }
 
 </script>
