@@ -5,10 +5,8 @@ const elFile = ref<HTMLInputElement | null>(null);
 
 const uploadQueue = ref<Set<File>>(new Set());
 
-const onFileChange = () => {
-  const files = elFile.value?.files;
-  if (!files?.length) return
-  for (let i = 0; i < files.length; i++) {
+const onFileChange = (files: FileList | File[]) => {
+  for (let i = 0; i < Array.from(files).length; i++) {
     uploadQueue.value.add(files[i]);
   }
 };
@@ -16,16 +14,14 @@ const onFileChange = () => {
 const onProcess = async () => {
   const file = uploadQueue.value.values().next().value;
   if (!file) return;
-  const fileSize = file.size;
-  const filename = file.name;
-  const chunkSize = 1024 * 1024;
-  const totalChunks = Math.ceil(fileSize / chunkSize);
+  const chunkSize = (1024 * 1024) * 2;
+  const totalChunks = Math.ceil(file.size / chunkSize);
 
   for (let i = 0; i < totalChunks; i++) {
-    const chunkData = file.slice(i * chunkSize, (i + 1) * chunkSize);
+    const currentChunk = file.slice(i * chunkSize, (i + 1) * chunkSize);
     const formData = new FormData();
-    formData.append('filename', filename);
-    formData.append('currentChink', chunkData);
+    formData.append('filename', file.name);
+    formData.append('currentChunk', currentChunk);
     formData.append('totalChunks', totalChunks);
     formData.append('chunkIndex', i);
 
@@ -45,6 +41,15 @@ const onProcess = async () => {
     console.log('All files uploaded');
   }
 };
+
+watch(uploadQueue, (queue) => {
+  if (queue.size > 0) {
+    console.log('Processing files', queue);
+    onProcess();
+  } else {
+    console.log('No files to process');
+  }
+}, {deep: true});
 </script>
 
 <template>
@@ -57,7 +62,6 @@ const onProcess = async () => {
       </div>
       <UploadDropzone @change="onFileChange"/>
     </div>
-
   </div>
 </template>
 

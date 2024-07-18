@@ -15,8 +15,7 @@ function onDrop(files: FileList | File[] | null) {
 }
 
 const {isOverDropZone} = useDropZone(dropZoneRef, {
-  onDrop,
-  dataTypes: ['*']
+  onDrop
 })
 
 const {files, open, onChange} = useFileDialog({
