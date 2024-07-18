@@ -6,27 +6,22 @@ const client = useSanctumClient();
 
 const queue = ref<Set<File>>(new Set());
 const progress = ref<number>(0);
-const PARALLEL_UPLOADS: number = 3 as const;
+const PARALLEL_UPLOADS: number = 1 as const;
 
-watch(queue, async (files) => {
-  if (queue.value.size > 0) {
+watch(queue, async () => {
+  if (queue.value.size < 1) return;
+
+  if (queue.value.size > PARALLEL_UPLOADS) {
     const uploads = Array.from(queue.value).slice(0, PARALLEL_UPLOADS);
-    console.log('New Batch: ', uploads);
-    const results = await Promise.all(uploads.map(upload));
-    console.log('🔥: ', results);
+    await Promise.all(uploads.map(upload));
+  } else {
+    await upload();
   }
-}, {immediate: true, deep: true});
-
-
-const identifiers = useCookie<string[] | null>('identifiers', {
-  default: () => null,
-  sameSite: 'strict',
-});
+}, {deep: true})
 
 
 async function upload() {
   const file = queue.value.values().next().value;
-  queue.value.delete(file);
   progress.value = 0;
 
   const identifier = nanoid(8);
@@ -34,17 +29,16 @@ async function upload() {
   const totalChunks = Math.ceil(file.size / chunkSize)
 
   for (let i = 0; i < totalChunks; i++) {
+    const formData = new FormData();
     const chunkNumber = i + 1;
     const currentChunk = file.slice(i * chunkSize, chunkNumber * chunkSize);
-
-    const formData = new FormData();
     formData.append('filename', file.name);
     formData.append('identifier', identifier);
+    formData.append('fileSize', file.size.toString());
     formData.append('totalChunks', totalChunks.toString());
     formData.append('chunkNumber', chunkNumber.toString());
     formData.append('currentChunk', currentChunk);
-    formData.append('chunkSize', chunkSize.toString()); // Opt
-    formData.append('totalSize', file.size.toString()); // Opt
+    formData.append('chunkSize', chunkSize.toString());
 
     try {
       const response = await client('/upload', {
@@ -56,6 +50,8 @@ async function upload() {
       console.warn('An error occurred', e.message)
     }
   }
+
+  queue.value.delete(file);
 }
 
 const onFileChange = (files: FileList | File[]) => {
