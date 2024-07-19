@@ -7,24 +7,24 @@ const PARALLEL_UPLOADS: number = 3 as const;
 
 interface QueueItem {
   file: File;
-  status: 'paused' | 'queued' | 'uploading' | 'completed' | 'failed';
+  status:  'queued' | 'uploading' | 'completed' | 'failed';
   progress: number;
   controller?: AbortController;
 }
 
-const queueMap = ref<Map<string, QueueItem>>(new Map());
+const uploadQueue = ref<Map<string, QueueItem>>(new Map());
 const totalFilesToUpload = shallowRef<number>(0);
 
-const progress = computed<number>(() => {
-  if (queueMap.value.size === 0 || totalFilesToUpload.value === 0) {
+const overallProgress = computed<number>(() => {
+  if (uploadQueue.value.size === 0 || totalFilesToUpload.value === 0) {
     return 0;
   }
 
-  const inProgressProgress = Array.from(queueMap.value.values()).reduce((acc, item) => {
+  const inProgressProgress = Array.from(uploadQueue.value.values()).reduce((acc, item) => {
     return acc + (item.progress || 0);
   }, 0);
 
-  const completedFiles = totalFilesToUpload.value - queueMap.value.size;
+  const completedFiles = totalFilesToUpload.value - uploadQueue.value.size;
   const completedProgress = completedFiles * 100;
   const totalProgress = completedProgress + inProgressProgress;
   const totalMaxProgress = totalFilesToUpload.value * 100;
@@ -37,7 +37,7 @@ const client = useSanctumClient();
 async function upload(file: File, identifier: string) {
   const controller = new AbortController();
 
-  queueMap.value.set(identifier, {
+  uploadQueue.value.set(identifier, {
     file,
     controller,
     status: 'uploading',
@@ -54,8 +54,8 @@ async function upload(file: File, identifier: string) {
     const chunkNumber = i + 1;
     const currentChunk = file.slice(i * chunkSize, chunkNumber * chunkSize);
 
-    formData.append('identifier', identifier);
     formData.append('fileName', file.name);
+    formData.append('identifier', identifier);
     formData.append('chunkNumber', chunkNumber.toString());
     formData.append('totalChunks', totalChunks.toString());
     formData.append('currentChunk', currentChunk);
@@ -66,20 +66,22 @@ async function upload(file: File, identifier: string) {
         body: formData,
         signal: controller.signal
       });
-      queueMap.value.set(identifier, {
+
+      uploadQueue.value.set(identifier, {
         file,
         controller,
         status,
         progress: status === 'uploading' ? progress : 100
       });
+
     } catch (err: FetchError) {
       const isPaused = controller.signal.reason === 'paused';
 
-      queueMap.value.set(identifier, {
+      uploadQueue.value.set(identifier, {
         file,
         controller,
-        status: isPaused ? 'paused' : 'failed',
-        progress: queueMap.value.get(identifier).progress
+        status: isPaused ? 'queued' : 'failed',
+        progress: uploadQueue.value.get(identifier).progress
       });
     }
 
@@ -87,9 +89,9 @@ async function upload(file: File, identifier: string) {
       break;
     }
 
-    if (queueMap.value.get(identifier).status === 'completed') {
+    if (uploadQueue.value.get(identifier).status === 'completed') {
       await sleep(100);
-      queueMap.value.delete(identifier);
+      uploadQueue.value.delete(identifier);
     }
   }
 }
@@ -97,53 +99,51 @@ async function upload(file: File, identifier: string) {
 
 async function onFileChange(files: FileList | File[]) {
 
-  if (totalFilesToUpload.value > 0) {
-    return;
-  }
-
-  totalFilesToUpload.value = Array.from(files).length;
+  totalFilesToUpload.value = Number(Array.from(files).length + uploadQueue.value.size);
 
   for (let i = 0; i < totalFilesToUpload.value; i++) {
-    const identifier = nanoid(8);
-    queueMap.value.set(identifier, {
+    uploadQueue.value.set(nanoid(8), {
       file: files[i],
-      progress: 0,
       status: 'queued',
+      progress: 0
     });
   }
 
 
-  while (queueMap.value.size > 0) {
-    const batch = Array.from(queueMap.value.entries())
-        .filter(([_, item]) => item.status === 'queued')
-        .slice(0, PARALLEL_UPLOADS);
+  while (uploadQueue.value.size > 0) {
+    const entries = Array.from(uploadQueue.value.entries());
+    const uploadingEntries = entries.filter(([_, item]) => item.status === 'uploading');
+    const allowedUNewUploadCount = PARALLEL_UPLOADS - uploadingEntries.length;
+    const batch = entries.filter(([_, item]) => item.status === 'queued').slice(0, allowedUNewUploadCount);
     const promises = batch.map(([identifier, item]) => upload(item.file, identifier));
-    await Promise.allSettled(promises);
+    await Promise.race(promises);
   }
+}
+
+function abortAllInQueue() {
+  for (const item of uploadQueue.value.values()) {
+    if (item.controller) item.controller.abort();
+  }
+  uploadQueue.value.clear();
+}
+
+function abortByIdentifier(identifier: string) {
+  const controller = uploadQueue.value.get(identifier)?.controller;
+  if (controller) controller.abort();
+  uploadQueue.value.delete(identifier);
 }
 
 function abortUpload(identifier?: string) {
-  if (identifier) {
-    const controller = queueMap.value.get(identifier)?.controller;
-    if (controller) {
-      controller.abort();
-    }
-    queueMap.value.delete(identifier);
-  } else {
-    for (const item of queueMap.value.values()) {
-      if (item.controller) {
-        item.controller.abort();
-      }
-    }
-    queueMap.value.clear();
-  }
+  identifier
+      ? abortByIdentifier(identifier)
+      : abortAllInQueue();
 }
 
 function pauseUpload(identifier: string) {
-  const item = queueMap.value.get(identifier);
-  queueMap.value.set(identifier, {
+  const item = uploadQueue.value.get(identifier);
+  uploadQueue.value.set(identifier, {
     ...item,
-    status: 'paused'
+    status: 'queued'
   });
 }
 
@@ -159,25 +159,26 @@ function pauseUpload(identifier: string) {
         Resume file upload with chunking.
       </p>
       <div class="mt-2 flex gap-2">
-        <Button variant="secondary" @click="queueMap.clear()">
+        <Button variant="secondary" @click="uploadQueue.clear()">
           Clear Queue
         </Button>
-        <Button variant="secondary" @click="abortUpload(queueMap.keys().next().value)">
-          Abort Upload
+        <Button variant="secondary" @click="abortUpload()">
+          Abort All
         </Button>
       </div>
     </div>
     <div class="grid md:grid-cols-2 gap-6 md:gap-12">
       <div>
-        <Progress v-model="progress" class="mb-4"/>
+        <Progress v-model="overallProgress" class="mb-4"/>
         <UploadDropzone @change="onFileChange"/>
       </div>
       <div class="flex flex-col gap-4">
         <h2 class="text-lg font-semibold tracking-tight leading-relaxed">
-          Upload Queue ({{ queueMap.size }})
+          Upload Queue ({{ uploadQueue.size }})
         </h2>
         <ul class="mt-2 flex flex-col gap-2">
-          <li v-for="[identifier, item] in queueMap" :key="identifier" class="flex justify-between items-center py-2">
+          <li v-for="[identifier, item] in uploadQueue" :key="identifier"
+              class="flex justify-between items-center py-2">
             <div class="grid grid-cols-[auto,1fr] grid-rows-min gap-2 items-center">
               <div class="grid grid-cols-[auto,1fr] gap-2 items-center">
                 <IconFileUp class="size-6"/>
