@@ -3,7 +3,7 @@ import type {FetchError} from "ofetch";
 import {nanoid} from "nanoid";
 import {sleep} from "@antfu/utils";
 
-const PARALLEL_UPLOADS: number = 2 as const;
+const PARALLEL_UPLOADS: number = 3 as const;
 
 interface QueueItem {
   file: File;
@@ -20,12 +20,17 @@ const progress = computed<number>(() => {
     return 0;
   }
 
-  const totalProgress = Array.from(queueMap.value.values())
-      .reduce((acc, item) => acc + item.progress, 0);
-  const maxTotalProgress = totalFilesToUpload.value * 100;
+  const inProgressProgress = Array.from(queueMap.value.values()).reduce((acc, item) => {
+    return acc + (item.progress || 0);
+  }, 0);
 
-  return Math.floor((totalProgress / maxTotalProgress) * 100);
+  const completedFiles = totalFilesToUpload.value - queueMap.value.size;
+  const completedProgress = completedFiles * 100;
+  const totalProgress = completedProgress + inProgressProgress;
+  const totalMaxProgress = totalFilesToUpload.value * 100;
+  return Math.floor((totalProgress / totalMaxProgress) * 100);
 });
+
 
 const client = useSanctumClient();
 
@@ -39,7 +44,7 @@ async function upload(file: File, identifier: string) {
     progress: 0
   });
 
-  await sleep(200);
+  await sleep(100);
 
   const chunkSize = (1024 * 1024) * 2;
   const totalChunks = Math.ceil(file.size / chunkSize)
@@ -56,17 +61,17 @@ async function upload(file: File, identifier: string) {
     formData.append('currentChunk', currentChunk);
 
     try {
-      const {progress, status,} = await client('/upload', {
+      const {progress, status} = await client('/upload', {
         method: 'POST',
         body: formData,
         signal: controller.signal
       });
-
       queueMap.value.set(identifier, {
-        file, controller, status,
+        file,
+        controller,
+        status,
         progress: status === 'uploading' ? progress : 100
       });
-
     } catch (err: FetchError) {
       const isPaused = controller.signal.reason === 'paused';
 
@@ -83,7 +88,7 @@ async function upload(file: File, identifier: string) {
     }
 
     if (queueMap.value.get(identifier).status === 'completed') {
-      await sleep(200);
+      await sleep(100);
       queueMap.value.delete(identifier);
     }
   }
@@ -109,22 +114,11 @@ async function onFileChange(files: FileList | File[]) {
 
 
   while (queueMap.value.size > 0) {
-    // Upload in batches of PARALLEL_UPLOADS
     const batch = Array.from(queueMap.value.entries())
         .filter(([_, item]) => item.status === 'queued')
         .slice(0, PARALLEL_UPLOADS);
-
-    await Promise.all(batch.map(([identifier, item]) => upload(item.file, identifier)))
-
-    for (const [identifier, item] of batch) {
-      if (item.status === 'uploading') {
-        queueMap.value.set(identifier, {
-          ...item,
-          status: 'completed',
-          progress: 100
-        });
-      }
-    }
+    const promises = batch.map(([identifier, item]) => upload(item.file, identifier));
+    await Promise.allSettled(promises);
   }
 }
 
@@ -168,58 +162,56 @@ function pauseUpload(identifier: string) {
         <Button variant="secondary" @click="queueMap.clear()">
           Clear Queue
         </Button>
-
         <Button variant="secondary" @click="abortUpload(queueMap.keys().next().value)">
           Abort Upload
         </Button>
       </div>
     </div>
-    <div class="grid md:grid-cols-2 gap-2">
+    <div class="grid md:grid-cols-2 gap-6 md:gap-12">
       <div>
         <Progress v-model="progress" class="mb-4"/>
         <UploadDropzone @change="onFileChange"/>
       </div>
-      <div>
-        <div class="">
-          <h2 class="text-lg font-semibold tracking-tight leading-relaxed">
-            Upload Queue ({{ queueMap.size }})
-          </h2>
-          <ul class="mt-2 flex flex-col gap-2">
-            <li v-for="[identifier, item] in queueMap" :key="identifier" class="flex justify-between items-center py-2">
-              <div class="grid grid-cols-[auto,1fr] grid-rows-min gap-2 items-center">
-                <div class="grid grid-cols-[auto,1fr] gap-2 items-center">
-                  <IconFileUp class="size-6"/>
-                  <span>{{ item.file.name }}</span>
-                </div>
-                <div class="flex flex-col gap-2">
-                  <Progress v-model="item.progress"/>
-                  <div>
-                    <span class="line-clamp-1">{{ identifier }}</span>
-                    <span class="px-1 py-0.5 bg-blue-300 text-blue-800 font-semibold leading-none">
+      <div class="flex flex-col gap-4">
+        <h2 class="text-lg font-semibold tracking-tight leading-relaxed">
+          Upload Queue ({{ queueMap.size }})
+        </h2>
+        <ul class="mt-2 flex flex-col gap-2">
+          <li v-for="[identifier, item] in queueMap" :key="identifier" class="flex justify-between items-center py-2">
+            <div class="grid grid-cols-[auto,1fr] grid-rows-min gap-2 items-center">
+              <div class="grid grid-cols-[auto,1fr] gap-2 items-center">
+                <IconFileUp class="size-6"/>
+                <span>{{ item.file.name }}</span>
+              </div>
+              <div class="flex flex-col gap-2">
+                <Progress v-model="item.progress"/>
+                <div>
+                  <span class="line-clamp-1">{{ identifier }}</span>
+                  <span class="px-1 py-0.5 font-semibold leading-none">
                       {{ item.status }}
                     </span>
-                  </div>
-                  <div class="flex gap-2">
-                    <template v-if="item.status !== 'completed'">
-                      <Button variant="secondary" @click="pauseUpload(identifier)">
-                        Pause
-                      </Button>
-                      <Button variant="secondary" @click="abortUpload(identifier)">
-                        Cancel
-                      </Button>
-                    </template>
-                  </div>
+                </div>
+                <div class="flex gap-2">
+                  <template v-if="item.status !== 'completed'">
+                    <Button variant="secondary" @click="pauseUpload(identifier)">
+                      Pause
+                    </Button>
+                    <Button variant="secondary" @click="abortUpload(identifier)">
+                      Cancel
+                    </Button>
+                  </template>
                 </div>
               </div>
-            </li>
-          </ul>
+            </div>
+          </li>
+        </ul>
 
-          <Button variant="secondary" @click="abortUpload()">
-            Abort All
-          </Button>
-        </div>
+        <Button variant="secondary" @click="abortUpload()">
+          Abort All
+        </Button>
       </div>
     </div>
+    <UploadedFiles/>
   </div>
 </template>
 
