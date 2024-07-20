@@ -43,6 +43,7 @@ export interface UploadQueueItem {
 }
 
 const PARALLEL_UPLOADS: number = 3 as const
+const CHUNK_SIZE: number = (1024 * 1024) * 2 as const
 
 const uploadQueue = ref<UploadQueueItem[]>([])
 
@@ -54,25 +55,26 @@ async function uploadFile(item: UploadQueueItem, startChunk: number = 0) {
   item.status = 'pending'
 
   try {
-    const chunkSize = (1024 * 1024) * 2
-    const totalChunks = Math.ceil(item.file.size / chunkSize)
+    const totalChunks = Math.ceil(item.file.size / CHUNK_SIZE)
 
-    for (let i = startChunk; i < totalChunks; i++) {
+    for (let chunkIndex = startChunk; chunkIndex < totalChunks; chunkIndex++) {
 
       const formData = new FormData()
-      const chunkNumber = i + 1;
-      const currentChunk = item.file.slice(i * chunkSize, chunkNumber * chunkSize)
+      const chunkNumber = chunkIndex + 1;
+
+      const currentChunk = item.file.slice(chunkIndex * CHUNK_SIZE, (chunkIndex + 1) * CHUNK_SIZE)
 
       formData.append('fileName', item.file.name)
       formData.append('identifier', item.identifier)
       formData.append('chunkNumber', chunkNumber.toString())
+      formData.append('chunkIndex', chunkIndex.toString())
       formData.append('totalChunks', totalChunks.toString())
       formData.append('currentChunk', currentChunk)
 
       const response = await client<UploadResponse>('/upload', {
         method: 'POST',
         body: formData,
-        signal: controller.signal,
+        signal: controller.signal
       });
 
       item.progress = response.progress
@@ -91,8 +93,16 @@ async function uploadFile(item: UploadQueueItem, startChunk: number = 0) {
       return
     }
 
+    // alt way of checking for pause
+    if (controller.signal.reason === 'paused') {
+      // Pause hook ...
+      console.log('paused')
+      return
+    }
+
     if (controller.signal.aborted) {
       // Abort hook ...
+      console.log('aborted')
     }
 
 
@@ -104,11 +114,10 @@ async function uploadFile(item: UploadQueueItem, startChunk: number = 0) {
 }
 
 async function processQueue() {
+  const isQueued = (item) => item.status === 'queued'
   const pendingUploads = uploadQueue.value.filter(item => item.status === 'pending').length
-  const someStillQueued = () => uploadQueue.value.some(item => item.status === 'queued')
-
-  while (pendingUploads < PARALLEL_UPLOADS && someStillQueued()) {
-    const nextItem = uploadQueue.value.find(item => item.status === 'queued')
+  while (pendingUploads < PARALLEL_UPLOADS && uploadQueue.value.some(isQueued)) {
+    const nextItem = uploadQueue.value.find(isQueued)
     if (nextItem) {
       nextItem.status = 'pending'
       uploadFile(nextItem).finally(processQueue)
@@ -117,7 +126,6 @@ async function processQueue() {
 }
 
 watch(() => uploadQueue.value.length, () => {
-  console.log('Queue changed, processing queue...')
   processQueue()
 })
 
@@ -157,10 +165,9 @@ async function retryUpload(item: UploadQueueItem) {
 
 
 async function resumeUpload(item: UploadQueueItem) {
-  const chunkSize = (1024 * 1024) * 2 // Size of each chunk
+  const chunkSize = (1024 * 1024) * 2
   const startChunk = Math.floor((item.progress / 100) * (item.file.size / chunkSize))
   item.status = 'queued'
-  console.log('Resuming upload from chunk:', startChunk)
   await uploadFile(item, startChunk)
 }
 
