@@ -7,11 +7,11 @@ const props = withDefaults(defineProps<{
 
 
 const emit = defineEmits<{
-  (type: 'resume', item: QueueItem, startChunk: number): void;
+  (type: 'resume', item: QueueItem): void;
 }>();
 
-function resumeHandler(item: QueueItem, startChunk: number) {
-  emit('resume', item, startChunk)
+function resumeHandler(item: QueueItem) {
+  emit('resume', item)
 }
 </script>
 
