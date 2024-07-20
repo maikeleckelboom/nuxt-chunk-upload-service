@@ -1,5 +1,5 @@
 <script setup lang="ts">
-function handleError(error: Error) {
+function handleError(error: unknown) {
   console.error(error)
 }
 </script>

@@ -1,72 +1,51 @@
 <script lang="ts" setup>
 import {nanoid} from "nanoid";
 import useOverallProgress from "~/composables/useOverallProgress";
-import {FetchError} from "ofetch";
-
-export interface FileRecord {
-  id: number;
-  user_id: number;
-  name: string;
-  size: number;
-  mime_type: string;
-  extension: string;
-  path: string;
-  created_at: string;
-  updated_at: string;
-}
-
-type CompletedUploadResponse = {
-  status: 'completed',
-  progress: number,
-  file: FileRecord
-};
-
-type BaseUploadResponse = {
-  status: 'queued' | 'paused' | 'pending',
-  progress: number,
-  identifier: string
-};
-
-type UploadResponse = BaseUploadResponse | CompletedUploadResponse;
-
-type FailedUploadResponse = Omit<BaseUploadResponse, 'status'> & {
-  status: 'failed',
-  reason: string
-};
-
-export interface UploadQueueItem {
-  file: File;
-  status: 'queued' | 'paused' | 'pending' | 'failed' | 'completed';
-  progress: number;
-  identifier: string;
-  controller?: AbortController;
-}
-
-const PARALLEL_UPLOADS: number = 3 as const
-const CHUNK_SIZE: number = (1024 * 1024) * 2 as const
-
-const uploadQueue = ref<UploadQueueItem[]>([])
+import type {FileRecord, QueueItem, UploadRecord, UploadResponse} from "~/types/upload";
 
 const client = useSanctumClient()
 
-async function uploadFile(item: UploadQueueItem, startChunk: number = 0) {
+const {
+  data: uploadRecords,
+  refresh: refreshUploadList
+} = await useAsyncData('uploads', async () => await client<UploadRecord[]>('/uploads'))
+
+const {
+  data: fileRecords,
+  refresh: refreshFileList
+} = await useAsyncData('files', async () => await client<FileRecord[]>('/files'))
+
+const PARALLEL_UPLOADS: number = 3 as const
+const CHUNK_SIZE: number = (1024 * 1024) * 2
+
+const uploadQueue = ref<QueueItem[]>([])
+
+function removeFromQueue(item: QueueItem) {
+  uploadQueue.value.filter((queueItem) => queueItem.identifier !== item.identifier)
+}
+
+async function uploadFile(item: QueueItem, startChunk: number = 0) {
+
   const controller = new AbortController()
+
   item.controller = controller
   item.status = 'pending'
 
+  if(item?.uploadedChunks ) {
+    startChunk = item.uploadedChunks
+  } else if (item.progress > 0) {
+    startChunk = Math.floor(((item.progress || 0) / 100) * (item.file.size / CHUNK_SIZE))
+  }
+
   try {
     const totalChunks = Math.ceil(item.file.size / CHUNK_SIZE)
-
+console.log('actually startChunk', startChunk)
     for (let chunkIndex = startChunk; chunkIndex < totalChunks; chunkIndex++) {
-
       const formData = new FormData()
-      const chunkNumber = chunkIndex + 1;
-
       const currentChunk = item.file.slice(chunkIndex * CHUNK_SIZE, (chunkIndex + 1) * CHUNK_SIZE)
 
       formData.append('fileName', item.file.name)
       formData.append('identifier', item.identifier)
-      formData.append('chunkNumber', chunkNumber.toString())
       formData.append('chunkIndex', chunkIndex.toString())
       formData.append('totalChunks', totalChunks.toString())
       formData.append('currentChunk', currentChunk)
@@ -82,54 +61,42 @@ async function uploadFile(item: UploadQueueItem, startChunk: number = 0) {
 
       if (response.status === 'completed') {
         item.controller = undefined
+        removeFromQueue(item)
       }
     }
 
-  } catch (error: FetchError) {
-
-    if (error?.message.split(' ').pop() === 'paused') {
-      // Pause hook ...
-
-      return
-    }
-
-    // alt way of checking for pause
-    if (controller.signal.reason === 'paused') {
-      // Pause hook ...
-      console.log('paused')
-      return
-    }
-
+  } catch (error: unknown) {
     if (controller.signal.aborted) {
-      // Abort hook ...
-      console.log('aborted')
+      if (controller.signal.reason === 'paused') {
+        // paused
+      }
+    } else {
+      item.status = 'failed'
+      item.progress = 0
     }
-
 
     item.controller = undefined
-    item.status = 'failed'
-    item.progress = 0
-
   }
 }
 
 async function processQueue() {
-  const isQueued = (item) => item.status === 'queued'
-  const pendingUploads = uploadQueue.value.filter(item => item.status === 'pending').length
+  const isQueued = (item: QueueItem) => item.status === 'queued'
+  const isPending = (item: QueueItem) => item.status === 'pending'
+  const pendingUploads = uploadQueue.value.filter(isPending).length
   while (pendingUploads < PARALLEL_UPLOADS && uploadQueue.value.some(isQueued)) {
     const nextItem = uploadQueue.value.find(isQueued)
     if (nextItem) {
-      nextItem.status = 'pending'
       uploadFile(nextItem).finally(processQueue)
     }
   }
 }
 
-watch(() => uploadQueue.value.length, () => {
+watch(() => uploadQueue.value.length, (v) => {
+  console.log('Queue Length:', v)
   processQueue()
 })
 
-const createQueueItem = (file: File): UploadQueueItem => ({
+const createQueueItem = (file: File): QueueItem => ({
   file,
   status: 'queued',
   identifier: nanoid(8),
@@ -138,37 +105,54 @@ const createQueueItem = (file: File): UploadQueueItem => ({
 
 function addFiles(files: File[] | FileList) {
   for (let i = 0; i < files.length; i++) {
-    const existingItem = uploadQueue.value.find(item => item.file.name === files[i].name)
-    if (existingItem) continue
-    uploadQueue.value.push(createQueueItem(files[i]))
+    const file = files[i] as File
+    const alreadyExists = uploadQueue.value.find(item => item.file.name === file.name)
+    if (alreadyExists) continue
+    uploadQueue.value.push(createQueueItem(file))
   }
 }
 
-function abortUpload(item: UploadQueueItem) {
+
+async function resumeUpload(item: QueueItem, startChunk: number | null = null) {
+  startChunk ??= Math.floor(((item.progress || 0) / 100) * (item.file.size / CHUNK_SIZE))
+  item.status = 'queued'
+
+  console.log('Resuming Upload with startChunk:', startChunk)
+
+
+  await uploadFile(item)
+}
+
+async function resumeHandler(item: QueueItem, startChunk?: number) {
+  const doesExist = (queItem: QueueItem) => queItem.identifier === item.identifier
+  const existsInQueue = uploadQueue.value.some(doesExist)
+  if (!existsInQueue) {
+    uploadQueue.value.splice(0, 0, item)
+    await nextTick()
+  }
+
+  processQueue().then(() => {
+
+  })
+}
+
+function abortHandler(item: QueueItem) {
   if (item.controller) {
     item.controller.abort()
     item.status = 'failed'
   }
 }
 
-function pauseUpload(item: UploadQueueItem) {
+function pauseHandler(item: QueueItem) {
   if (item.controller) {
     item.controller.abort('paused')
     item.status = 'paused'
   }
 }
 
-async function retryUpload(item: UploadQueueItem) {
+async function retryHandler(item: QueueItem) {
   item.status = 'queued'
   await uploadFile(item)
-}
-
-
-async function resumeUpload(item: UploadQueueItem) {
-  const chunkSize = (1024 * 1024) * 2
-  const startChunk = Math.floor((item.progress / 100) * (item.file.size / chunkSize))
-  item.status = 'queued'
-  await uploadFile(item, startChunk)
 }
 
 async function onFileChange(files: File[] | FileList) {
@@ -184,27 +168,52 @@ const overallProgress = useOverallProgress(uploadQueue)
     <div>
       <UploadDropzone @change="onFileChange"/>
     </div>
+    <template v-if="uploadQueue.length > 1">
+      <div class="flex items-center gap-2">
+        <span class="tabular-nums font-semibold">{{ overallProgress }}%</span>
+        <Progress v-model="overallProgress"/>
+      </div>
+    </template>
     <div>
-      <div class="grid grid-cols-2 gap-2">
+      <h1 class="text-2xl font-semibold tracking-tight leading-relaxed">
+        Upload Manager
+      </h1>
+      <div class="grid grid-cols-3 gap-4">
         <div class="flex flex-col gap-2">
-          <div>
-            <p>{{ overallProgress }}%</p>
-            <Progress v-model="overallProgress"/>
+          <div class="flex flex-col gap-2">
+            <h2 class="text-lg font-semibold">
+              Failed Uploads List
+            </h2>
+            <Button size="sm" variant="secondary" @click="refreshUploadList">
+              Refresh
+            </Button>
           </div>
-          <ul>
-            <li v-for="item in uploadQueue" :key="item.identifier">
-              <UploadQueueItem
-                  :item="item"
-                  @abort="abortUpload"
-                  @pause="pauseUpload"
-                  @resume="resumeUpload"
-                  @retry="retryUpload"
-              />
-            </li>
-          </ul>
+          <UploadList :items="uploadRecords" @resume="resumeHandler"/>
         </div>
-        <div>
-          <UploadedFiles/>
+        <div class="flex flex-col gap-2">
+          <div class="flex flex-col gap-2">
+            <h2 class="text-lg font-semibold">
+              Upload Queue
+            </h2>
+          </div>
+          <QueueList
+              :items="uploadQueue"
+              @abort="abortHandler"
+              @pause="pauseHandler"
+              @resume="resumeHandler"
+              @retry="retryHandler"
+          />
+        </div>
+        <div class="flex flex-col gap-2">
+          <div class="flex flex-col gap-2">
+            <h2 class="text-lg font-semibold">
+              Uploaded Files List
+            </h2>
+            <Button size="sm" variant="secondary" @click="refreshFileList">
+              Refresh
+            </Button>
+          </div>
+          <FileList :items="fileRecords"/>
         </div>
       </div>
     </div>

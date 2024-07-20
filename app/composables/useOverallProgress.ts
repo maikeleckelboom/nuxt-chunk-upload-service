@@ -1,8 +1,8 @@
-import type {UploadQueueItem} from "~/components/UploadQueue.vue";
 import type {Ref} from "vue";
+import type {TQueueItem} from "~/types/upload";
 
 
-export default function useOverallProgress(uploadQueue: Ref<UploadQueueItem[]>): Ref<number> {
+export default function useOverallProgress(uploadQueue: Ref<TQueueItem[]>): Ref<number> {
     return computed<number>(() => {
         const uploadQueueLength = uploadQueue.value.length;
         const totalFiles = uploadQueue.value.filter(item => item.status !== 'queued').length;
