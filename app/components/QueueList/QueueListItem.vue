@@ -1,20 +1,14 @@
 <script lang="ts" setup>
-import { matches } from '~/utils/matches'
 import { type QueueItem } from '~/types/upload'
+import type { ActionEventKey } from '~/utils/upload'
 
 const props = defineProps<{
   item: QueueItem
 }>()
 
-type EmitKey = 'pause' | 'resume' | 'abort' | 'retry'
-
 const emit = defineEmits<{
-  (type: EmitKey, item: QueueItem): void
+  (type: ActionEventKey, item: QueueItem): void
 }>()
-
-async function sendEmit(type: EmitKey, item: QueueItem) {
-  emit(type, item)
-}
 </script>
 
 <template>
@@ -22,7 +16,7 @@ async function sendEmit(type: EmitKey, item: QueueItem) {
     <div class="flex flex-col justify-center gap-2 rounded border p-3">
       <div class="flex items-center justify-between gap-2">
         <strong>{{ item.file.name }}</strong>
-        <span class="font-semibold tabular-nums">{{ Math.round(item.progress) }}%</span>
+        <span class="font-semibold tabular-nums"> {{ Math.round(item.progress) }}% </span>
       </div>
       <div>
         <Progress v-model="item.progress" />
@@ -30,10 +24,11 @@ async function sendEmit(type: EmitKey, item: QueueItem) {
       <div class="flex items-center gap-2">
         <UploadControlButtons
           :item="item"
-          @abort="sendEmit('abort', item)"
-          @pause="sendEmit('pause', item)"
-          @resume="sendEmit('resume', item)"
-          @retry="sendEmit('retry', item)"
+          @abort="emit('abort', item)"
+          @pause="emit('pause', item)"
+          @remove="emit('remove', item)"
+          @resume="emit('resume', item)"
+          @retry="emit('retry', item)"
         />
       </div>
     </div>

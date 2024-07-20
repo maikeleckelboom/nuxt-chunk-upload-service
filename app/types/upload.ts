@@ -33,7 +33,7 @@ export interface BaseUploadResponse {
 export interface CompletedUploadResponse {
   status: 'completed'
   progress: number
-  uploadedFile: FileRecord
+  file: FileRecord
 }
 
 export type UploadResponse = BaseUploadResponse | CompletedUploadResponse

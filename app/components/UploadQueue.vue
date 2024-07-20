@@ -5,15 +5,26 @@ import type { FileRecord, QueueItem, UploadRecord, UploadResponse } from '~/type
 
 const client = useSanctumClient()
 
-const { data: uploads, refresh: refreshUploads } = await useAsyncData(
+const { data: uploadsData, refresh: refreshUploads } = await useAsyncData(
   'uploads',
   async () => await client<UploadRecord[]>('/uploads')
 )
 
-const { data: files, refresh: refreshFiles } = await useAsyncData(
+const { data: filesData, refresh: refreshFiles } = await useAsyncData(
   'files',
   async () => await client<FileRecord[]>('/files')
 )
+
+const files = ref<FileRecord[]>(filesData.value || [])
+const uploads = ref<UploadRecord[]>(uploadsData.value || [])
+
+watch(uploadsData, (data) => {
+  uploads.value = data || []
+})
+
+watch(filesData, (data) => {
+  files.value = data || []
+})
 
 const PARALLEL_UPLOADS: number = 3 as const
 const CHUNK_SIZE: number = 1024 * 1024 * 2
@@ -21,15 +32,20 @@ const CHUNK_SIZE: number = 1024 * 1024 * 2
 const uploadQueue = ref<QueueItem[]>([])
 
 function removeFromQueue(item: QueueItem) {
-  uploadQueue.value = uploadQueue.value.filter(
-    queueItem => queueItem.identifier !== item.identifier
+  const index = uploadQueue.value.findIndex(
+    (queuedItem) => queuedItem.identifier === item.identifier
   )
+  if (index !== -1) {
+    uploadQueue.value.splice(index, 1)
+  }
 }
 
 function processCompletedUpload(item: QueueItem, fileRecord: FileRecord) {
-  removeFromQueue(item)
-  files.value = files.value || []
-  files.value.push(fileRecord)
+  // removeFromQueue(item)
+  const exists = (file: FileRecord) => file.id === fileRecord.id
+  if (!files.value.some(exists)) {
+    files.value.unshift(fileRecord)
+  }
 }
 
 async function uploadFile(item: QueueItem) {
@@ -65,16 +81,22 @@ async function uploadFile(item: QueueItem) {
       item.status = response.status
 
       if (response.status === 'completed') {
-        processCompletedUpload(item, response.uploadedFile)
+        processCompletedUpload(item, response.file)
         processQueue()
       }
     }
   } catch (error: unknown) {
+    const { signal } = controller
+
     item.controller = undefined
 
-    if (controller.signal.aborted && controller.signal.reason === 'paused') {
+    if (signal.aborted && signal.reason === 'paused') {
       item.status = 'paused'
       return
+    }
+
+    if (signal.aborted) {
+      item.progress = 0
     }
 
     item.status = 'failed'
@@ -108,17 +130,18 @@ function addFiles(files: File[] | FileList) {
       uploadQueue.value.push(createQueueItem(file))
     }
   }
-
   processQueue()
 }
 
 async function resumeHandler(item: QueueItem) {
   const existsInQueue = (queItem: QueueItem) => queItem.identifier === item.identifier
-  if (uploadQueue.value.some(existsInQueue)) {
-    await uploadFile(item)
+  const queuedItem = uploadQueue.value.find(existsInQueue)
+  if (queuedItem?.status === 'paused') {
+    queuedItem.status = 'queued'
   } else {
     uploadQueue.value.push(item)
   }
+  processQueue()
 }
 
 function abortHandler(item: QueueItem) {
@@ -133,8 +156,13 @@ function pauseHandler(item: QueueItem) {
   }
 }
 
-async function retryHandler(item: QueueItem) {
-  await uploadFile(item)
+function retryHandler(item: QueueItem) {
+  item.status = 'queued'
+  processQueue()
+}
+
+function removeHandler(item: QueueItem) {
+  removeFromQueue(item)
 }
 
 async function onFileChange(files: File[] | FileList) {
@@ -193,6 +221,7 @@ const overallProgress = useOverallProgress(uploadQueue)
           <QueueList
             :items="uploadQueue"
             @abort="abortHandler"
+            @remove="removeHandler"
             @pause="pauseHandler"
             @resume="resumeHandler"
             @retry="retryHandler"
