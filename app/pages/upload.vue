@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import type {FetchError} from "ofetch";
 import {nanoid} from "nanoid";
 import {sleep} from "@antfu/utils";
 
@@ -7,7 +6,7 @@ const PARALLEL_UPLOADS: number = 3 as const;
 
 interface QueueItem {
   file: File;
-  status:  'queued' | 'uploading' | 'completed' | 'failed';
+  status: 'queued' | 'paused' | 'pending' | 'failed' | 'completed'
   progress: number;
   controller?: AbortController;
 }
@@ -28,7 +27,7 @@ const overallProgress = computed<number>(() => {
   const completedProgress = completedFiles * 100;
   const totalProgress = completedProgress + inProgressProgress;
   const totalMaxProgress = totalFilesToUpload.value * 100;
-  return Math.floor((totalProgress / totalMaxProgress) * 100);
+  return Math.round((totalProgress / totalMaxProgress) * 100);
 });
 
 
@@ -37,11 +36,17 @@ const client = useSanctumClient();
 async function upload(file: File, identifier: string) {
   const controller = new AbortController();
 
+  const item = uploadQueue.value.get(identifier);
+
+  if (!item || item?.status === 'paused') {
+    console.log('paused');
+    return Promise.resolve();
+  }
+
   uploadQueue.value.set(identifier, {
-    file,
-    controller,
-    status: 'uploading',
-    progress: 0
+    ...item,
+    status: 'pending',
+    controller
   });
 
   await sleep(100);
@@ -50,6 +55,7 @@ async function upload(file: File, identifier: string) {
   const totalChunks = Math.ceil(file.size / chunkSize)
 
   for (let i = 0; i < totalChunks; i++) {
+
     const formData = new FormData();
     const chunkNumber = i + 1;
     const currentChunk = file.slice(i * chunkSize, chunkNumber * chunkSize);
@@ -61,62 +67,93 @@ async function upload(file: File, identifier: string) {
     formData.append('currentChunk', currentChunk);
 
     try {
-      const {progress, status} = await client('/upload', {
+      const response = await client('/upload', {
         method: 'POST',
         body: formData,
         signal: controller.signal
       });
 
-      uploadQueue.value.set(identifier, {
-        file,
-        controller,
-        status,
-        progress: status === 'uploading' ? progress : 100
-      });
-
-    } catch (err: FetchError) {
-      const isPaused = controller.signal.reason === 'paused';
+      console.log(response)
 
       uploadQueue.value.set(identifier, {
-        file,
-        controller,
-        status: isPaused ? 'queued' : 'failed',
-        progress: uploadQueue.value.get(identifier).progress
+        ...uploadQueue.value.get(identifier),
+        status: response.status,
+        progress: response.progress,
+      })
+
+      if (response.status === 'completed') {
+        uploadQueue.value.set(identifier, {
+          ...uploadQueue.value.get(identifier),
+          status: response.status,
+          progress: response.progress,
+          controller: undefined
+        });
+      }
+
+      return
+
+    } catch (err: unknown) {
+
+      if (controller.signal.aborted) {
+        if (controller.signal.reason === 'paused') {
+          uploadQueue.value.set(identifier, {
+            ...uploadQueue.value.get(identifier),
+            status: 'paused',
+          });
+        } else {
+          uploadQueue.value.delete(identifier);
+        }
+
+        break;
+      }
+
+      if (import.meta.env.DEV) {
+        console.error(err, 'at the end in error block of upload function');
+      }
+    }
+
+    controller.signal.addEventListener('pause', () => {
+      const item = uploadQueue.value.get(identifier);
+      if (item.controller) {
+        item.controller.abort('paused');
+      }
+      uploadQueue.value.set(identifier, {
+        ...uploadQueue.value.get(identifier),
+        status: 'paused',
       });
-    }
 
-    if (controller.signal.aborted) {
-      break;
-    }
+    });
 
-    if (uploadQueue.value.get(identifier).status === 'completed') {
-      await sleep(100);
-      uploadQueue.value.delete(identifier);
-    }
+
   }
+
 }
 
-
 async function onFileChange(files: FileList | File[]) {
-
-  totalFilesToUpload.value = Number(Array.from(files).length + uploadQueue.value.size);
+  const validItemsInQueue = Array.from(uploadQueue.value.values()).filter(item => ['queued'].includes(item.status));
+  totalFilesToUpload.value = Number(Array.from(files).length + validItemsInQueue.length);
 
   for (let i = 0; i < totalFilesToUpload.value; i++) {
-    uploadQueue.value.set(nanoid(8), {
-      file: files[i],
+    const file = files[i];
+    const identifier = nanoid(8);
+    uploadQueue.value.set(identifier, {
+      file,
       status: 'queued',
       progress: 0
     });
   }
 
+  const entries = Array.from(uploadQueue.value.entries()).filter(([_, item]) => item.status === 'queued');
 
-  while (uploadQueue.value.size > 0) {
-    const entries = Array.from(uploadQueue.value.entries());
-    const uploadingEntries = entries.filter(([_, item]) => item.status === 'uploading');
-    const allowedUNewUploadCount = PARALLEL_UPLOADS - uploadingEntries.length;
-    const batch = entries.filter(([_, item]) => item.status === 'queued').slice(0, allowedUNewUploadCount);
-    const promises = batch.map(([identifier, item]) => upload(item.file, identifier));
-    await Promise.race(promises);
+  while (entries.length > 0) {
+    const pendingEntries = entries.filter(([_, item]) => item.status === 'pending');
+    const queued = entries.filter(([_, item]) => item.status === 'queued');
+    const batch = queued.slice(0, PARALLEL_UPLOADS - pendingEntries.length);
+    const promises = batch.map(([identifier, item]) => {
+      return upload(item.file, identifier)
+    });
+    const firstResolved = await Promise.race(promises);
+    console.log('firstResolved', firstResolved);
   }
 }
 
@@ -133,18 +170,12 @@ function abortByIdentifier(identifier: string) {
   uploadQueue.value.delete(identifier);
 }
 
-function abortUpload(identifier?: string) {
-  identifier
-      ? abortByIdentifier(identifier)
-      : abortAllInQueue();
-}
-
 function pauseUpload(identifier: string) {
   const item = uploadQueue.value.get(identifier);
-  uploadQueue.value.set(identifier, {
-    ...item,
-    status: 'queued'
-  });
+
+  if (item.controller) {
+    item.controller.signal.dispatchEvent(new Event('pause'));
+  }
 }
 
 </script>
@@ -152,17 +183,32 @@ function pauseUpload(identifier: string) {
 <template>
   <div class="container px-12 py-4">
     <div class="mb-4">
-      <h1 class="text-2xl font-semibold tracking-tight leading-relaxed">
+      <h1 class="text-2xl font-semibold tracking-tight leading-relaxed mb-3">
         Upload Files
       </h1>
-      <p class="text-muted-foreground text-sm">
-        Resume file upload with chunking.
-      </p>
+      <div class="text-sm">
+        <p>
+          <strong>Max Parallel Uploads:</strong> {{ PARALLEL_UPLOADS }}
+        </p>
+        <p>
+          <strong>Chunk Size:</strong> 2MB
+        </p>
+        <p>
+          <strong>Overall Progress:</strong> {{ overallProgress }}%
+        </p>
+        <p>
+          <strong>Total Files:</strong> {{ totalFilesToUpload }}
+        </p>
+        <p>
+          <strong>Queue Size:</strong> {{ uploadQueue.size }}
+        </p>
+
+      </div>
       <div class="mt-2 flex gap-2">
         <Button variant="secondary" @click="uploadQueue.clear()">
           Clear Queue
         </Button>
-        <Button variant="secondary" @click="abortUpload()">
+        <Button variant="secondary" @click="abortAllInQueue()">
           Abort All
         </Button>
       </div>
@@ -197,7 +243,7 @@ function pauseUpload(identifier: string) {
                     <Button variant="secondary" @click="pauseUpload(identifier)">
                       Pause
                     </Button>
-                    <Button variant="secondary" @click="abortUpload(identifier)">
+                    <Button variant="secondary" @click="abortByIdentifier(identifier)">
                       Cancel
                     </Button>
                   </template>
@@ -207,7 +253,7 @@ function pauseUpload(identifier: string) {
           </li>
         </ul>
 
-        <Button variant="secondary" @click="abortUpload()">
+        <Button variant="secondary" @click="abortAllInQueue()">
           Abort All
         </Button>
       </div>

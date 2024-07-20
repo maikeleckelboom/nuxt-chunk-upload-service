@@ -16,7 +16,7 @@
       <Button variant="outline">
         Get Started
       </Button>
-      <NuxtLink to="/upload">
+      <NuxtLink to="/queue">
         <Button variant="default">
           Upload
         </Button>
