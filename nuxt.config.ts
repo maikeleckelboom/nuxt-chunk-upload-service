@@ -2,13 +2,19 @@
 export default defineNuxtConfig({
     compatibilityDate: '2024-04-03',
 
+    typescript: {
+      typeCheck: false,
+      strict: true,
+    },
+
     future: {
         compatibilityVersion: 4,
     },
 
     devtools: {enabled: true},
+
     modules: ['nuxt-auth-sanctum', '@vueuse/nuxt'],
-    // Auth
+
     runtimeConfig: {
         public: {
             sanctum: {

@@ -37,6 +37,10 @@ export default defineNuxtConfig({
                 imports: ['capitalize'],
                 from: 'vue'
             },
+            // {
+            //     imports: ['nanoid'],
+            //     from: 'nanoid'
+            // },
             {
                 imports: ['cva'],
                 from: 'class-variance-authority'
@@ -57,7 +61,7 @@ export default defineNuxtConfig({
     },
 
     lucide: {
-        namePrefix: 'Icon'
+        namePrefix: 'Icon',
     },
 
     // viewport: {
