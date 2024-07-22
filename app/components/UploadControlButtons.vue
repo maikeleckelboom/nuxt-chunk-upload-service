@@ -1,5 +1,5 @@
-<script generic="T extends QueueItem | UploadRecord" lang="ts" setup>
-import type { QueueItem, UploadRecord } from '~/types/upload'
+<script generic="T extends QueueItem | UploadItem" lang="ts" setup>
+import type { QueueItem, UploadItem } from '~/types/upload'
 
 const props = defineProps<{
   item: T

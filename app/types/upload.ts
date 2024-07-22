@@ -1,4 +1,4 @@
-export interface UploadRecord {
+export interface UploadItem {
   id: number
   user_id: number
   file_name: string
@@ -12,7 +12,7 @@ export interface UploadRecord {
   updated_at: Date
 }
 
-export interface FileRecord {
+export interface FileItem {
   id: number
   user_id: number
   name: string
@@ -33,7 +33,7 @@ export interface BaseUploadResponse {
 export interface CompletedUploadResponse {
   status: 'completed'
   progress: number
-  file: FileRecord
+  file: FileItem
 }
 
 export type UploadResponse = BaseUploadResponse | CompletedUploadResponse
@@ -56,7 +56,7 @@ export function isQueueItem(item: any): item is QueueItem {
   return item && item.file && item.status && item.progress && item.identifier
 }
 
-export function isUploadRecord(item: any): item is UploadRecord {
+export function isUploadRecord(item: any): item is UploadItem {
   return (
     item && item.id && item.user_id && item.file_name && item.file_path && item.identifier
   )

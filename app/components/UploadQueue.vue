@@ -1,22 +1,22 @@
 <script lang="ts" setup>
 import { nanoid } from 'nanoid'
 import useOverallProgress from '~/composables/useOverallProgress'
-import type { FileRecord, QueueItem, UploadRecord, UploadResponse } from '~/types/upload'
+import type { FileItem, QueueItem, UploadItem, UploadResponse } from '~/types/upload'
 
 const client = useSanctumClient()
 
 const { data: uploadsData, refresh: refreshUploads } = await useAsyncData(
   'uploads',
-  async () => await client<UploadRecord[]>('/uploads')
+  async () => await client<UploadItem[]>('/uploads')
 )
 
 const { data: filesData, refresh: refreshFiles } = await useAsyncData(
   'files',
-  async () => await client<FileRecord[]>('/files')
+  async () => await client<FileItem[]>('/files')
 )
 
-const files = ref<FileRecord[]>(filesData.value || [])
-const uploads = ref<UploadRecord[]>(uploadsData.value || [])
+const files = ref<FileItem[]>(filesData.value || [])
+const uploads = ref<UploadItem[]>(uploadsData.value || [])
 
 watch(uploadsData, (data) => {
   uploads.value = data || []
@@ -40,9 +40,9 @@ function removeFromQueue(item: QueueItem) {
   }
 }
 
-function processCompletedUpload(item: QueueItem, fileRecord: FileRecord) {
+function processCompletedUpload(item: QueueItem, fileRecord: FileItem) {
   // removeFromQueue(item)
-  const exists = (file: FileRecord) => file.id === fileRecord.id
+  const exists = (file: FileItem) => file.id === fileRecord.id
   if (!files.value.some(exists)) {
     files.value.unshift(fileRecord)
   }
@@ -69,6 +69,7 @@ async function uploadFile(item: QueueItem) {
       formData.append('identifier', item.identifier)
       formData.append('chunkIndex', chunkIndex.toString())
       formData.append('totalChunks', totalChunks.toString())
+      formData.append('totalSize', item.file.size.toString())
       formData.append('currentChunk', currentChunk)
 
       const response = await client<UploadResponse>('/upload', {

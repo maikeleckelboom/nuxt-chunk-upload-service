@@ -1,19 +1,19 @@
 <script lang="ts" setup>
-import { type QueueItem, type UploadRecord } from '~/types/upload'
+import { type QueueItem, type UploadItem } from '~/types/upload'
 
 const props = defineProps<{
-  item: UploadRecord
+  item: UploadItem
 }>()
 
 const emit = defineEmits<{
   (type: 'resume', item: QueueItem): void
 }>()
 
-function getProgress(item: UploadRecord): number {
+function getProgress(item: UploadItem): number {
   return (item.uploaded_chunks / item.total_chunks) * 100
 }
 
-function makeQueueItem(item: UploadRecord, file: File): QueueItem {
+function makeQueueItem(item: UploadItem, file: File): QueueItem {
   return {
     file,
     status: 'queued',

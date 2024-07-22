@@ -1,17 +1,15 @@
 <script setup lang="ts">
-import type {FileRecord} from "~/types/upload";
+import type { FileItem } from '~/types/upload'
 
 const props = defineProps<{
-  item: FileRecord
-}>();
+  item: FileItem
+}>()
 </script>
 
 <template>
-<div>
-  <pre>{{item}}</pre>
-</div>
+  <div>
+    <pre>{{ item }}</pre>
+  </div>
 </template>
 
-<style scoped>
-
-</style>
+<style scoped></style>
