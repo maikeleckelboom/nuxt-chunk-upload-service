@@ -105,8 +105,13 @@ async function sendPauseRequest(item: QueueItem) {
   })
 }
 
-async function processQueue() {
+async function sendRemoveRequest(item: QueueItem) {
+  await client(`/upload/${item.identifier}`, {
+    method: 'DELETE'
+  })
+}
 
+async function processQueue() {
   const pendingItems = uploadQueue.value.filter((item) => item.status === 'pending')
   const queuedItems = uploadQueue.value.filter((item) => item.status === 'queued')
 
@@ -114,33 +119,27 @@ async function processQueue() {
     return
   }
 
-  const itemsToProcess = PARALLEL_UPLOADS - pendingItems.length
+  const nextItem = queuedItems.shift()
 
-  for (let i = 0; i < itemsToProcess; i++) {
-    const item = queuedItems.shift()
-    if (item) {
-      await uploadFile(item)
-    }
-  }
-
-  if (queuedItems.length > 0) {
+  if (nextItem) {
+    nextItem.status = 'pending'
+    await uploadFile(nextItem)
     await processQueue()
   }
 }
 
-const createQueueItem = (file: File): QueueItem => ({
-  file,
-  status: 'queued',
-  identifier: nanoid(8),
-  progress: 0
-})
 
 function addFiles(files: File[] | FileList) {
   for (let i = 0; i < files.length; i++) {
     const file = files[i] as File
     const existsInQueue = (item: QueueItem) => item.file.name === file.name
     if (!uploadQueue.value.find(existsInQueue)) {
-      uploadQueue.value.push(createQueueItem(file))
+      uploadQueue.value.push({
+        file,
+        status: 'queued',
+        identifier: nanoid(8),
+        progress: 0
+      })
     }
   }
   processQueue()
@@ -164,10 +163,10 @@ function abortHandler(item: QueueItem) {
 }
 
 function pauseHandler(item: QueueItem) {
-  sendPauseRequest(item)
   if (item.controller) {
     item.controller.abort('paused')
   }
+  sendPauseRequest(item)
 }
 
 function retryHandler(item: QueueItem) {
