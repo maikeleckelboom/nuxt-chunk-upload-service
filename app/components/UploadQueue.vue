@@ -61,12 +61,12 @@ async function uploadFile(item: QueueItem) {
         chunkIndex * CHUNK_SIZE,
         (chunkIndex + 1) * CHUNK_SIZE
       )
-      formData.append('fileName', item.file.name)
-      formData.append('fileSize', item.file.size.toString())
-      formData.append('identifier', item.identifier)
+      formData.append('currentChunk', currentChunk)
       formData.append('chunkIndex', chunkIndex.toString())
       formData.append('totalChunks', totalChunks.toString())
-      formData.append('currentChunk', currentChunk)
+      formData.append('identifier', item.identifier)
+      formData.append('fileName', item.file.name)
+      formData.append('fileSize', item.file.size.toString())
 
       const response = await client<UploadResponse>('/upload', {
         method: 'POST',
