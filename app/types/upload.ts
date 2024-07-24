@@ -2,14 +2,13 @@ export interface UploadItem {
   id: number
   user_id: number
   file_name: string
-  file_path: string
+  path: string
   identifier: string
   total_chunks: number
   uploaded_chunks: number
-  status: 'pending' | 'completed' | 'paused' | 'failed'
-  deleted_at?: Date
-  created_at: Date
-  updated_at: Date
+  status: 'pending' | 'done' | 'paused' | 'failed'
+  created_at: string
+  updated_at: string
 }
 
 export interface FileItem {
@@ -25,18 +24,18 @@ export interface FileItem {
 }
 
 export interface BaseUploadResponse {
-  status: 'queued' | 'paused' | 'pending'
+  status: 'pending' | 'paused'
   progress: number
   identifier: string
 }
 
-export interface CompletedUploadResponse {
-  status: 'completed'
+export interface UploadDoneResponse {
+  status: 'done'
   progress: number
   file: FileItem
 }
 
-export type UploadResponse = BaseUploadResponse | CompletedUploadResponse
+export type UploadResponse = BaseUploadResponse | UploadDoneResponse
 
 export type FailedUploadResponse = Omit<BaseUploadResponse, 'status'> & {
   status: 'failed'
@@ -45,7 +44,7 @@ export type FailedUploadResponse = Omit<BaseUploadResponse, 'status'> & {
 
 export interface QueueItem {
   file: File
-  status: 'queued' | 'paused' | 'pending' | 'failed' | 'completed'
+  status: 'queued' | 'paused' | 'pending' | 'failed' | 'done'
   progress: number
   identifier: string
   controller?: AbortController

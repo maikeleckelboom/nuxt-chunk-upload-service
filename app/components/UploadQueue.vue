@@ -1,6 +1,5 @@
 <script lang="ts" setup>
 import { nanoid } from 'nanoid'
-import useOverallProgress from '~/composables/useOverallProgress'
 import type { FileItem, QueueItem, UploadItem, UploadResponse } from '~/types/upload'
 
 const client = useSanctumClient()
@@ -18,12 +17,12 @@ const { data: filesData, refresh: refreshFiles } = await useAsyncData(
 const files = ref<FileItem[]>(filesData.value || [])
 const uploads = ref<UploadItem[]>(uploadsData.value || [])
 
-watch(uploadsData, (data) => {
-  uploads.value = data || []
+watch(uploadsData, () => {
+  uploads.value = uploadsData.value || []
 })
 
-watch(filesData, (data) => {
-  files.value = data || []
+watch(filesData, () => {
+  files.value = filesData.value || []
 })
 
 const PARALLEL_UPLOADS: number = 3 as const
@@ -40,12 +39,10 @@ function removeFromQueue(item: QueueItem) {
   }
 }
 
-function processCompletedUpload(item: QueueItem, fileRecord: FileItem) {
-  // removeFromQueue(item)
-  const exists = (file: FileItem) => file.id === fileRecord.id
-  if (!files.value.some(exists)) {
-    files.value.unshift(fileRecord)
-  }
+function processUploadDone(item: QueueItem) {
+  removeFromQueue(item)
+  refreshFiles()
+  processQueue()
 }
 
 async function uploadFile(item: QueueItem) {
@@ -64,12 +61,11 @@ async function uploadFile(item: QueueItem) {
         chunkIndex * CHUNK_SIZE,
         (chunkIndex + 1) * CHUNK_SIZE
       )
-
       formData.append('fileName', item.file.name)
+      formData.append('fileSize', item.file.size.toString())
       formData.append('identifier', item.identifier)
       formData.append('chunkIndex', chunkIndex.toString())
       formData.append('totalChunks', totalChunks.toString())
-      formData.append('totalSize', item.file.size.toString())
       formData.append('currentChunk', currentChunk)
 
       const response = await client<UploadResponse>('/upload', {
@@ -81,9 +77,8 @@ async function uploadFile(item: QueueItem) {
       item.progress = response.progress
       item.status = response.status
 
-      if (response.status === 'completed') {
-        processCompletedUpload(item, response.file)
-        processQueue()
+      if (response.status === 'done') {
+        processUploadDone(item)
       }
     }
   } catch (error: unknown) {
@@ -104,15 +99,32 @@ async function uploadFile(item: QueueItem) {
   }
 }
 
-function processQueue() {
-  const isQueued = (item: QueueItem) => item.status === 'queued'
-  const isPending = (item: QueueItem) => item.status === 'pending'
-  const pendingCount = uploadQueue.value.filter(isPending).length
-  while (pendingCount < PARALLEL_UPLOADS && uploadQueue.value.some(isQueued)) {
-    const nextItem = uploadQueue.value.find(isQueued)
-    if (nextItem) {
-      uploadFile(nextItem).finally(processQueue)
+async function sendPauseRequest(item: QueueItem) {
+  await client(`/upload/${item.identifier}/pause`, {
+    method: 'POST'
+  })
+}
+
+async function processQueue() {
+
+  const pendingItems = uploadQueue.value.filter((item) => item.status === 'pending')
+  const queuedItems = uploadQueue.value.filter((item) => item.status === 'queued')
+
+  if (pendingItems.length >= PARALLEL_UPLOADS) {
+    return
+  }
+
+  const itemsToProcess = PARALLEL_UPLOADS - pendingItems.length
+
+  for (let i = 0; i < itemsToProcess; i++) {
+    const item = queuedItems.shift()
+    if (item) {
+      await uploadFile(item)
     }
+  }
+
+  if (queuedItems.length > 0) {
+    await processQueue()
   }
 }
 
@@ -142,7 +154,7 @@ async function resumeHandler(item: QueueItem) {
   } else {
     uploadQueue.value.push(item)
   }
-  processQueue()
+  await processQueue()
 }
 
 function abortHandler(item: QueueItem) {
@@ -152,6 +164,7 @@ function abortHandler(item: QueueItem) {
 }
 
 function pauseHandler(item: QueueItem) {
+  sendPauseRequest(item)
   if (item.controller) {
     item.controller.abort('paused')
   }
@@ -169,8 +182,6 @@ function removeHandler(item: QueueItem) {
 async function onFileChange(files: File[] | FileList) {
   addFiles(files)
 }
-
-const overallProgress = useOverallProgress(uploadQueue)
 </script>
 
 <template>
@@ -178,12 +189,6 @@ const overallProgress = useOverallProgress(uploadQueue)
     <div>
       <UploadDropzone @change="onFileChange" />
     </div>
-    <template v-if="uploadQueue.length > 1">
-      <div class="flex items-center gap-2">
-        <span class="font-semibold tabular-nums">{{ overallProgress }}%</span>
-        <Progress v-model="overallProgress" />
-      </div>
-    </template>
     <div>
       <h1 class="text-2xl font-semibold leading-relaxed tracking-tight">
         Upload Manager
