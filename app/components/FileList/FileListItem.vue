@@ -7,8 +7,9 @@ const props = defineProps<{
 </script>
 
 <template>
-  <div>
-    <pre>{{ item }}</pre>
+  <div v-if="item.mime_type.includes('image')" class="p-1">
+    <p class="mb-1 tracking-tight font-semibold text-sm">{{ item.name }}</p>
+    <NuxtImg :src="item.url" :alt="item.name" class="rounded" heighy="100"/>
   </div>
 </template>
 

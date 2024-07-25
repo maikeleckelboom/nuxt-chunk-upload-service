@@ -192,23 +192,7 @@ async function onFileChange(files: File[] | FileList) {
       <h1 class="text-2xl font-semibold leading-relaxed tracking-tight">
         Upload Manager
       </h1>
-      <div class="grid grid-cols-3 gap-4">
-        <div class="flex flex-col gap-2">
-          <div class="flex flex-col gap-2">
-            <h2 class="text-lg font-semibold">Failed Uploads</h2>
-            <Button
-              size="sm"
-              variant="secondary"
-              @click="refreshUploads"
-            >
-              Refresh
-            </Button>
-          </div>
-          <UploadList
-            :items="uploads"
-            @resume="resumeHandler"
-          />
-        </div>
+      <div class="grid grid-cols-[0.8fr,1fr] gap-4">
         <div class="flex flex-col gap-2">
           <div class="flex flex-col gap-2">
             <h2 class="text-lg font-semibold">Upload Queue</h2>

@@ -6,10 +6,10 @@
   <div class="container px-2 py-4">
     <div class="mb-4">
       <h1 class="text-3xl font-semibold tracking-tight leading-relaxed">
-        Rocket Man <span class="ml-1">🚀</span>
+        ChunkDrive 1.0
       </h1>
       <p class="text-muted-foreground">
-        A simple and fast way to create your own website.
+        Upload large files with ease; ChunkDrive will take care of the rest.
       </p>
     </div>
     <div class="space-x-2">

@@ -19,6 +19,7 @@ export interface FileItem {
   mime_type: string
   extension: string
   path: string
+  url: string
   created_at: string
   updated_at: string
 }
