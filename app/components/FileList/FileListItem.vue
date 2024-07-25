@@ -7,9 +7,21 @@ const props = defineProps<{
 </script>
 
 <template>
-  <div v-if="item.mime_type.includes('image')" class="p-1">
+  <div  class="p-1">
     <p class="mb-1 tracking-tight font-semibold text-sm">{{ item.name }}</p>
-    <NuxtImg :src="item.url" :alt="item.name" class="rounded" heighy="100"/>
+    <template v-if="item.mime_type.includes('image')">
+      <NuxtImg :src="item.url" :alt="item.name" class="rounded" />
+    </template>
+    <template v-if="item.mime_type.includes('video')">
+      <video :src="item.url" controls class="rounded"></video>
+    </template>
+    <template v-if="item.mime_type.includes('audio')">
+      <audio controls class="w-full" :src="item.url">
+      </audio>
+    </template>
+    <template v-else>
+      <pre>{{ item}}</pre>
+    </template>
   </div>
 </template>
 

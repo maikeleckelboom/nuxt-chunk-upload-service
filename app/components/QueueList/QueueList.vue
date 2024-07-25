@@ -29,6 +29,7 @@ const emit = defineEmits<{
         @remove="emit('remove', item)"
         @resume="emit('resume', item)"
         @retry="emit('retry', item)"
+        @repair="emit('repair', item)"
       />
     </li>
   </ul>

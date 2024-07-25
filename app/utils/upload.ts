@@ -1,1 +1,1 @@
-export type ActionEventKey = 'pause' | 'resume' | 'abort' | 'retry' | 'remove'
+export type ActionEventKey = 'pause' | 'resume' | 'abort' | 'retry' | 'remove' | 'repair'

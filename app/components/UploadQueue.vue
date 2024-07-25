@@ -67,6 +67,7 @@ async function uploadFile(item: QueueItem) {
       formData.append('identifier', item.identifier)
       formData.append('fileName', item.file.name)
       formData.append('fileSize', item.file.size.toString())
+      formData.append('fileType', item.file.type)
 
       const response = await client<UploadResponse>('/upload', {
         method: 'POST',
@@ -181,6 +182,32 @@ function removeHandler(item: QueueItem) {
 async function onFileChange(files: File[] | FileList) {
   addFiles(files)
 }
+
+const uploadQueueData = computed(() => {
+  return Array.from(new Set([
+      ...uploads.value,
+      ...uploadQueue.value,
+    ]
+  ))
+})
+
+
+function repairHandler(item: UploadItem) {
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.accept = item.file_type
+  input.multiple = false
+  input.click()
+  input.onchange = (event) => {
+    const [file] = (event.target as HTMLInputElement).files
+    if (file) {
+      (<QueueItem>item).file = file;
+      (<QueueItem>item).status = 'queued'
+      uploadQueue.value.push(<QueueItem>item)
+      processQueue()
+    }
+  }
+}
 </script>
 
 <template>
@@ -208,12 +235,13 @@ async function onFileChange(files: File[] | FileList) {
             </div>
           </div>
           <QueueList
-            :items="uploadQueue"
+            :items="uploadQueueData"
             @abort="abortHandler"
             @remove="removeHandler"
             @pause="pauseHandler"
             @resume="resumeHandler"
             @retry="retryHandler"
+            @repair="repairHandler"
           />
         </div>
         <div class="flex flex-col gap-2">
