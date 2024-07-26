@@ -31,7 +31,7 @@ async function sendEmit(type: EmitKey, item: T) {
       Resume
     </Button>
     <Button
-      v-if="matches(props.item.status, 'pending', 'queued', 'paused')"
+      v-if="matches(props.item.status, 'pending')"
       @click="sendEmit('abort', props.item)"
     >
       Abort

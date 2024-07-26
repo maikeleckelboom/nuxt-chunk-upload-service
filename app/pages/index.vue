@@ -1,5 +1,8 @@
 <script setup lang="ts">
 
+async function untitledAction() {
+  console.log('Hello, World!')
+}
 </script>
 
 <template>
@@ -13,8 +16,9 @@
       </p>
     </div>
     <div class="space-x-2">
-      <Button variant="outline">
-        Get Started
+      <Button variant="outline"
+              @click="untitledAction">
+        Search
       </Button>
       <NuxtLink to="/queue">
         <Button variant="default">

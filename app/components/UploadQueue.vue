@@ -133,8 +133,7 @@ async function processQueue() {
 function addFiles(files: File[] | FileList) {
   for (let i = 0; i < files.length; i++) {
     const file = files[i] as File
-    const existsInQueue = (item: QueueItem) => item.file.name === file.name
-    if (!uploadQueue.value.find(existsInQueue)) {
+    if (!uploadQueue.value.find((item) => item.file.name === file.name)) {
       uploadQueue.value.push({
         file,
         status: 'queued',
@@ -147,8 +146,7 @@ function addFiles(files: File[] | FileList) {
 }
 
 async function resumeHandler(item: QueueItem) {
-  const existsInQueue = (queItem: QueueItem) => queItem.identifier === item.identifier
-  const queuedItem = uploadQueue.value.find(existsInQueue)
+  const queuedItem = uploadQueue.value.find(d => d.identifier === item.identifier)
   if (queuedItem?.status === 'paused') {
     queuedItem.status = 'queued'
   } else {
@@ -211,15 +209,12 @@ function repairHandler(item: UploadItem) {
 </script>
 
 <template>
-  <div class="container my-4 flex flex-col gap-4">
+  <div class="container my-4 flex flex-col gap-4 overflow-auto">
     <div>
       <UploadDropzone @change="onFileChange" />
     </div>
     <div>
-      <h1 class="text-2xl font-semibold leading-relaxed tracking-tight">
-        Upload Manager
-      </h1>
-      <div class="grid grid-cols-[0.8fr,1fr] gap-4">
+      <div class="grid grid-cols-[0.5fr,1fr] gap-4">
         <div class="flex flex-col gap-2">
           <div class="flex flex-col gap-2">
             <h2 class="text-lg font-semibold">Upload Queue</h2>

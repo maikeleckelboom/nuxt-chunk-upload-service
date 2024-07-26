@@ -21,6 +21,7 @@
     "@tanstack/vue-table": "^8.19.3",
     "@vee-validate/zod": "^4.13.2",
     "@vueuse/nuxt": "^10.11.0",
+    "chart.js": "^4.4.3",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.1",
     "nuxt-auth-sanctum": "^0.4.2",
@@ -33,7 +34,10 @@
     "tailwindcss-animate": "^1.0.7",
     "typescript": "^5.5.3",
     "vee-validate": "^4.13.2",
+    "vue-chartjs": "^5.3.1",
     "vue-tsc": "^2.0.26",
+    "waveform-data": "^4.5.0",
+    "ytmusic-api": "^5.2.2",
     "zod": "^3.23.8"
   }
 }
