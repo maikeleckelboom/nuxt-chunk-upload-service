@@ -1,75 +1,35 @@
-# Nuxt 3 Minimal Starter
+# Laravel Chunk Upload Service
 
-Look at the [Nuxt 3 documentation](https://nuxt.com/docs/getting-started/introduction) to learn more.
+**Laravel Chunk Upload Service** is a powerful package designed to simplify the process of uploading large files in Laravel applications. By breaking down files into smaller, manageable chunks, this service ensures reliable and efficient file transfers, even over unstable network connections.
 
-## Setup
+## Key Features
 
-Make sure to install the dependencies:
+- **Chunked Uploads:** Splits large files into smaller chunks for improved reliability and easier error recovery.
+- **Resumable Uploads:** Supports pausing and resuming of uploads, allowing users to recover from interruptions.
+- **Automatic Assembly:** Once all chunks have been received, the service automatically assembles them into the final file.
+- **Upload Management:** Provides endpoints to pause, delete, and monitor the status of uploads.
+- **Cleanup Mechanism:** Ensures temporary data is removed after uploads are complete or cancelled, keeping the system clean.
 
-```bash
-# npm
-npm install
+## How It Works
 
-# pnpm
-pnpm install
+1. **Uploading Chunks:**  
+   Each file is divided into multiple chunks and sent to dedicated endpoints. The service stores each chunk temporarily on the server.
+2. **Validation & Assembly:**  
+   When all chunks have been uploaded, the system validates the complete file and merges the chunks into the final file.
+3. **Management & Cleanup:**  
+   Endpoints allow users to pause or cancel uploads, and the service cleans up any temporary data associated with incomplete uploads.
 
-# yarn
-yarn install
+## Getting Started
 
-# bun
-bun install
-```
+- **Installation:**  
+  Integrate the package into your Laravel project using Composer and configure it according to your application's needs.
+- **Usage:**  
+  Utilize the provided controllers (e.g., `UploadController`) and services (e.g., `UploadService`) to handle file uploads. These components manage chunk storage, assembly, and upload lifecycle operations.
+- **Documentation:**  
+  Detailed usage instructions and examples are available in the project documentation to help you get started quickly.
 
-## Development Server
+This service is ideal for applications requiring robust handling of large file uploads—ensuring a seamless and reliable user experience.
 
-Start the development server on `http://localhost:3000`:
+---
 
-```bash
-# npm
-npm run dev
-
-# pnpm
-pnpm run dev
-
-# yarn
-yarn dev
-
-# bun
-bun run dev
-```
-
-## Production
-
-Build the application for production:
-
-```bash
-# npm
-npm run build
-
-# pnpm
-pnpm run build
-
-# yarn
-yarn build
-
-# bun
-bun run build
-```
-
-Locally preview production build:
-
-```bash
-# npm
-npm run preview
-
-# pnpm
-pnpm run preview
-
-# yarn
-yarn preview
-
-# bun
-bun run preview
-```
-
-Check out the [deployment documentation](https://nuxt.com/docs/getting-started/deployment) for more information.
+Explore, contribute, and enjoy efficient file handling with the Laravel Chunk Upload Service.

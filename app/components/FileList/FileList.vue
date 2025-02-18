@@ -9,9 +9,19 @@ const props = withDefaults(
     items: () => []
   }
 )
+
+const client = useSanctumClient()
+
+async function deleteAll() {
+  for (const item of props.items) {
+    await client(`/file/${item.id}`, { method: 'DELETE',mode: 'cors' })
+  }
+}
 </script>
 
 <template>
+<div>
+  <button @click="deleteAll">Delete all</button>
   <ul>
     <li
       v-for="item in items"
@@ -20,4 +30,5 @@ const props = withDefaults(
       <FileListItem :item="item" />
     </li>
   </ul>
+</div>
 </template>
